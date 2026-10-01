@@ -41,7 +41,7 @@ pub struct PythonSpy {
     #[cfg(target_os = "linux")]
     pub dockerized: bool,
     #[cfg(target_os = "linux")]
-    pub thread_cpu_times: HashMap<u64, u64>,
+    pub thread_cpu_times: HashMap<u64, (u64, std::time::Instant)>,
 }
 
 impl PythonSpy {
@@ -205,7 +205,7 @@ impl PythonSpy {
         #[cfg(target_os = "linux")]
         let thread_activity: HashMap<Tid, bool> = HashMap::new();
         #[cfg(target_os = "linux")]
-        let mut seen_tids: Vec<u64> = Vec::new();
+        let mut seen_tids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
         // Lock the process if appropriate. Note we have to lock AFTER getting the thread
         // activity status from the OS (otherwise each thread would report being inactive always).
@@ -305,7 +305,7 @@ impl PythonSpy {
             if let Some(id) = trace.os_thread_id {
                 #[cfg(target_os = "linux")]
                 if !self.config.gil_only {
-                    seen_tids.push(id);
+                    seen_tids.insert(id);
                     trace.active = self._is_thread_on_cpu(id);
                 }
                 #[cfg(not(target_os = "linux"))]
@@ -359,6 +359,12 @@ impl PythonSpy {
 
     #[cfg(target_os = "linux")]
     fn _is_thread_on_cpu(&mut self, tid: u64) -> bool {
+        if !self.process.is_self {
+            return remoteprocess::Thread::new(tid as Tid)
+                .ok()
+                .and_then(|t| t.active().ok())
+                .unwrap_or(false);
+        }
         // MAKE_THREAD_CPUCLOCK(tid, CPUCLOCK_SCHED|CPUCLOCK_PERTHREAD_MASK)
         let clockid: libc::clockid_t = (!(tid as i32) << 3) | 6;
         let mut ts = libc::timespec {
@@ -366,12 +372,22 @@ impl PythonSpy {
             tv_nsec: 0,
         };
         if unsafe { libc::clock_gettime(clockid, &mut ts) } != 0 {
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                warn!("clock_gettime failed for tid {}; treating as idle", tid);
+            }
             return false;
         }
         let cpu_ns = ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64;
-        match self.thread_cpu_times.insert(tid, cpu_ns) {
-            Some(prev) => cpu_ns > prev,
-            None => true,
+        let now = std::time::Instant::now();
+        match self.thread_cpu_times.insert(tid, (cpu_ns, now)) {
+            None => false,
+            Some((prev_cpu, prev_wall)) => {
+                let delta_cpu = cpu_ns.saturating_sub(prev_cpu);
+                let elapsed_ns = prev_wall.elapsed().as_nanos() as u64;
+                elapsed_ns > 0 && delta_cpu >= elapsed_ns / 20
+            }
         }
     }
 
