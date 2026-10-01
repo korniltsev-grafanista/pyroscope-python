@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
+use libc;
+
 use anyhow::{Context, Error, Result};
 use remoteprocess::{Pid, Process, ProcessMemory, Tid};
 
@@ -36,6 +39,8 @@ pub struct PythonSpy {
     pub(crate) debug_offsets: Option<PythonDebugOffsets>,
     #[cfg(target_os = "linux")]
     pub dockerized: bool,
+    #[cfg(target_os = "linux")]
+    pub thread_cpu_times: HashMap<u64, u64>,
 }
 
 impl PythonSpy {
@@ -77,6 +82,8 @@ impl PythonSpy {
             threadstate_address,
             #[cfg(target_os = "linux")]
             dockerized: python_info.dockerized,
+            #[cfg(target_os = "linux")]
+            thread_cpu_times: HashMap::new(),
             config: config.clone(),
             short_filenames: HashMap::new(),
             python_thread_ids: HashMap::new(),
@@ -178,22 +185,26 @@ impl PythonSpy {
 
     // implementation of get_stack_traces, where we have a type for the InterpreterState
     fn _get_stack_traces<I: InterpreterState>(&mut self) -> Result<Vec<StackTrace>, Error> {
-        // Query the OS to get if each thread in the process is running or not
-        let mut thread_activity = HashMap::new();
-        if self.config.gil_only {
-            // Don't need to collect thread activity if we're only getting the
-            // GIL thread: If we're holding the GIL we're by definition active.
-        } else {
-            for thread in self.process.threads()?.iter() {
-                let threadid: Tid = thread.id()?;
-                let Ok(active) = thread.active() else {
-                    // Do not fail all sampling if a single thread died between entering the loop
-                    // and reading its status.
-                    continue;
-                };
-                thread_activity.insert(threadid, active);
+        // On non-Linux platforms, query the OS for per-thread run state via procfs.
+        // On Linux, per-thread CPU clocks replace this (see _is_thread_on_cpu).
+        #[cfg(not(target_os = "linux"))]
+        let thread_activity: HashMap<Tid, bool> = {
+            let mut map = HashMap::new();
+            if !self.config.gil_only {
+                for thread in self.process.threads()?.iter() {
+                    let threadid: Tid = thread.id()?;
+                    let Ok(active) = thread.active() else {
+                        continue;
+                    };
+                    map.insert(threadid, active);
+                }
             }
-        }
+            map
+        };
+        #[cfg(target_os = "linux")]
+        let thread_activity: HashMap<Tid, bool> = HashMap::new();
+        #[cfg(target_os = "linux")]
+        let mut seen_tids: Vec<u64> = Vec::new();
 
         // Lock the process if appropriate. Note we have to lock AFTER getting the thread
         // activity status from the OS (otherwise each thread would report being inactive always).
@@ -277,20 +288,21 @@ impl PythonSpy {
             trace.owns_gil = owns_gil;
             trace.pid = self.process.pid;
 
-            // Figure out if the thread is sleeping from the OS if possible
             trace.active = true;
             if let Some(id) = trace.os_thread_id {
-                let id = id as Tid;
-                if let Some(active) = thread_activity.get(&id as _) {
-                    trace.active = *active;
+                #[cfg(target_os = "linux")]
+                if !self.config.gil_only {
+                    seen_tids.push(id);
+                    trace.active = self._is_thread_on_cpu(id);
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let id = id as Tid;
+                    if let Some(active) = thread_activity.get(&id as _) {
+                        trace.active = *active;
+                    }
                 }
             }
-
-            // fallback to using a heuristic if we think the thread is still active
-            // Note that on linux the OS thread activity can only be gotten on x86_64
-            // processors and even then seems to be wrong occasionally in thinking 'select'
-            // calls are active (which seems related to the thread locking code,
-            // this problem doesn't seem to happen with the --nonblocking option)
             if trace.active {
                 trace.active = !self._heuristic_is_thread_idle(&trace);
             }
@@ -324,7 +336,30 @@ impl PythonSpy {
                 break;
             }
         }
+        #[cfg(target_os = "linux")]
+        if !self.config.gil_only {
+            self.thread_cpu_times
+                .retain(|tid, _| seen_tids.contains(tid));
+        }
         Ok(traces)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn _is_thread_on_cpu(&mut self, tid: u64) -> bool {
+        // MAKE_THREAD_CPUCLOCK(tid, CPUCLOCK_SCHED|CPUCLOCK_PERTHREAD_MASK)
+        let clockid: libc::clockid_t = (!(tid as i32) << 3) | 6;
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        if unsafe { libc::clock_gettime(clockid, &mut ts) } != 0 {
+            return false;
+        }
+        let cpu_ns = ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64;
+        match self.thread_cpu_times.insert(tid, cpu_ns) {
+            Some(prev) => cpu_ns > prev,
+            None => true,
+        }
     }
 
     // heuristic fallback for determining if a thread is active, used

@@ -18,3 +18,14 @@ hash.
 | perf: cache resolved frames by code object | 10 | 1187.5 | 34.0 |
 | perf: cache resolved frames by code object | 50 | 4563.1 | 114.0 |
 | perf: cache resolved frames by code object | 200 | 16972.6 | 414.0 |
+
+All rows above use `gil_only=true`. The table below uses `gil_only=false, include_idle=true`
+on Linux aarch64 (OrbStack VM). "procfs overhead (before)" is the cost of the eliminated
+`readdir`+stat path measured in isolation. "total ns/sample (after)" is the complete
+per-sample cost with the new cpu-clock path. Estimated old total = after + procfs overhead.
+
+| change | threads | procfs overhead ns (before) | total ns/sample (after) | est. old total ns |
+|--------|--------:|----------------------------:|------------------------:|------------------:|
+| perf: detect on-cpu threads with per-thread cpu clocks | 1 | 3936 | 1259 | 5195 |
+| perf: detect on-cpu threads with per-thread cpu clocks | 10 | 28603 | 6287 | 34890 |
+| perf: detect on-cpu threads with per-thread cpu clocks | 50 | 161947 | 33690 | 195637 |
