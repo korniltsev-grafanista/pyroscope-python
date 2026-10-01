@@ -76,6 +76,14 @@ pub fn enable_kindasafe() {
     KINDASAFE_ENABLED.store(true, std::sync::atomic::Ordering::Release);
 }
 
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub fn disable_kindasafe() {
+    KINDASAFE_ENABLED.store(false, std::sync::atomic::Ordering::Release);
+}
+
 #[cfg(target_os = "freebsd")]
 mod freebsd;
 #[cfg(target_os = "freebsd")]
@@ -368,13 +376,13 @@ pub mod tests {
         kindasafe_init::sanity_check().expect("kindasafe sanity check failed");
         enable_kindasafe();
         let fast_result = process.read(addr, &mut buf);
+        unsafe { libc::munmap(page, 4096) };
+        disable_kindasafe();
         assert!(
             matches!(fast_result, Err(Error::ReadMemFault(_))),
             "kindasafe path must return ReadMemFault, got {:?}",
             fast_result
         );
-
-        unsafe { libc::munmap(page, 4096) };
     }
 
     #[derive(Copy, Clone)]

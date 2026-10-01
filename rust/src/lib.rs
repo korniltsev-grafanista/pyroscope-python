@@ -167,21 +167,42 @@ fn initialize_agent(
         any(target_os = "linux", target_os = "macos"),
         any(target_arch = "x86_64", target_arch = "aarch64")
     ))]
-    {
+    if cpu_enabled {
+        use remoteprocess::ProcessMemory as _;
         match kindasafe_init::init() {
-            Ok(()) => match kindasafe_init::sanity_check() {
-                Ok(()) => {
-                    remoteprocess::enable_kindasafe();
+            Ok(()) => {
+                remoteprocess::enable_kindasafe();
+                let pid: remoteprocess::Pid = std::process::id().try_into().unwrap();
+                let probe_ok = remoteprocess::Process::new(pid).ok().map_or(false, |proc| {
+                    let page = unsafe {
+                        libc::mmap(
+                            std::ptr::null_mut(),
+                            4096,
+                            libc::PROT_NONE,
+                            libc::MAP_PRIVATE | libc::MAP_ANON,
+                            -1,
+                            0,
+                        )
+                    };
+                    if page == libc::MAP_FAILED {
+                        return false;
+                    }
+                    let addr = page as usize;
+                    let mut buf = [0u8; 8];
+                    let result = proc.read(addr, &mut buf);
+                    unsafe { libc::munmap(page, 4096) };
+                    matches!(result, Err(remoteprocess::Error::ReadMemFault(_)))
+                });
+                if probe_ok {
                     log::info!(target: "pyroscope-python", "kindasafe fast path enabled");
-                }
-                Err(e) => {
+                } else {
+                    remoteprocess::disable_kindasafe();
                     log::warn!(
                         target: "pyroscope-python",
-                        "kindasafe sanity check failed ({:?}); using syscall path",
-                        e
+                        "kindasafe read-path probe failed; using syscall path"
                     );
                 }
-            },
+            }
             Err(e) => {
                 log::warn!(
                     target: "pyroscope-python",
@@ -261,6 +282,11 @@ fn drop_agent(py: Python<'_>) -> bool {
     let dropped = ffikit::stop(py).is_ok();
     if dropped {
         AGENT_RUNNING.store(false, Ordering::Release);
+        #[cfg(all(
+            any(target_os = "linux", target_os = "macos"),
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        remoteprocess::disable_kindasafe();
     }
     dropped
 }

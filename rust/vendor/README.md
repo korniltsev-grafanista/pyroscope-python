@@ -52,8 +52,11 @@ These crates are not vendored; they are pulled from git at build time.
 - Both crates **must** come from the same git source and rev. A mixed pin
   (one from git, one from crates.io) builds two copies of `kindasafe`; the
   signal handler matches crash-point PCs from one copy while reads execute
-  code in the other, so the first bad pointer kills the process silently.
-  There is no compile-time signal for this.
+  code in the other. There is no compile-time signal for this, but the
+  init path in `rust/src/lib.rs` probes the real read path through
+  `remoteprocess::Process::read` on a `PROT_NONE` page and disables the
+  fast path if it does not return `ReadMemFault`, catching this mismatch
+  at startup.
 - TODO: move pin to a released version once the PR merges.
 - Known limitation: we assume this process owns SIGSEGV and SIGBUS. Any
   handler installed after ours (CPython `faulthandler`, a crash reporter,
