@@ -15,7 +15,7 @@ use crate::python_interpreters::{
 
 const FRAME_CACHE_CAPACITY: usize = 4096;
 
-/// Code-object-derived fields cached per (code_ptr, lasti, first_lineno).
+/// Code-object-derived fields cached per code-object identity.
 pub struct CachedFrame {
     pub name: String,
     pub filename: String,
@@ -23,11 +23,10 @@ pub struct CachedFrame {
     pub line: i32,
 }
 
-/// LRU cache keyed on (code_ptr, lasti, first_lineno).
-/// first_lineno is part of the key to guard against code-ptr reuse: when CPython
-/// frees a code object and allocates a new one at the same address, the first
-/// line number will differ, causing a miss and a fresh read.
-pub type FrameCache = LruCache<(usize, i32, i32), CachedFrame>;
+/// LRU cache keyed on (code_ptr, lasti, first_lineno, name_ptr, filename_ptr, line_table_ptr).
+/// A new code object at the same address carries different string/table pointers, so
+/// stale entries from a freed code object cannot be returned.
+pub type FrameCache = LruCache<(usize, i32, i32, usize, usize, usize), CachedFrame>;
 
 pub fn new_frame_cache() -> FrameCache {
     LruCache::new(NonZeroUsize::new(FRAME_CACHE_CAPACITY).unwrap())
@@ -179,13 +178,22 @@ where
         }
 
         let code_ptr = frame.code() as usize;
-        let lasti = frame.lasti();
         let code = process
             .copy_pointer(frame.code())
             .context("Failed to copy PyCodeObject")?;
-        // first_lineno is part of the cache key; it guards against code-ptr reuse
+        let lasti = frame.lasti();
         let first_lineno = code.first_lineno();
-        let cache_key = (code_ptr, lasti, first_lineno);
+        let name_ptr = code.qualname().unwrap_or_else(|| code.name()) as usize;
+        let filename_ptr = code.filename() as usize;
+        let line_table_ptr = code.line_table() as usize;
+        let cache_key = (
+            code_ptr,
+            lasti,
+            first_lineno,
+            name_ptr,
+            filename_ptr,
+            line_table_ptr,
+        );
 
         if let Some(ref mut c) = cache {
             if let Some(cached) = c.get(&cache_key) {
@@ -469,20 +477,35 @@ mod tests {
             module: None,
             line: 10,
         };
-        cache.put((1000usize, 5i32, 1i32), entry);
+        cache.put((1000usize, 5i32, 1i32, 100usize, 200usize, 300usize), entry);
 
-        assert!(cache.get(&(1000, 5, 1)).is_some(), "same key should hit");
         assert!(
-            cache.get(&(1000, 6, 1)).is_none(),
+            cache.get(&(1000, 5, 1, 100, 200, 300)).is_some(),
+            "same key should hit"
+        );
+        assert!(
+            cache.get(&(1000, 6, 1, 100, 200, 300)).is_none(),
             "different lasti should miss"
         );
         assert!(
-            cache.get(&(1000, 5, 2)).is_none(),
+            cache.get(&(1000, 5, 2, 100, 200, 300)).is_none(),
             "different first_lineno should miss"
         );
         assert!(
-            cache.get(&(2000, 5, 1)).is_none(),
+            cache.get(&(2000, 5, 1, 100, 200, 300)).is_none(),
             "different code_ptr should miss"
+        );
+        assert!(
+            cache.get(&(1000, 5, 1, 999, 200, 300)).is_none(),
+            "different name_ptr should miss"
+        );
+        assert!(
+            cache.get(&(1000, 5, 1, 100, 999, 300)).is_none(),
+            "different filename_ptr should miss"
+        );
+        assert!(
+            cache.get(&(1000, 5, 1, 100, 200, 999)).is_none(),
+            "different line_table_ptr should miss"
         );
     }
 
@@ -510,9 +533,8 @@ mod tests {
 
         let mut code = PyCodeObject {
             co_firstlineno: 1,
-            co_filename: &mut filename_obj.base.ob_base as *mut py::PyASCIIObject
-                as *mut py::PyObject,
-            co_name: &mut name_obj.base.ob_base as *mut py::PyASCIIObject as *mut py::PyObject,
+            co_filename: &mut filename_obj.base as *mut py::PyASCIIObject as *mut py::PyObject,
+            co_name: &mut name_obj.base as *mut py::PyASCIIObject as *mut py::PyObject,
             co_lnotab: &mut lnotab_obj.base as *mut py::PyBytesObject as *mut py::PyObject,
             ..Default::default()
         };
