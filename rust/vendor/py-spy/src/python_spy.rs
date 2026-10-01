@@ -20,7 +20,8 @@ use crate::python_process_info::{
 };
 use crate::python_threading::thread_name_lookup;
 use crate::stack_trace::{
-    get_gil_threadid, get_stack_trace, new_frame_cache, FrameCache, StackTrace,
+    get_gil_threadid, get_gil_threadstate_addr, get_stack_trace, new_frame_cache, FrameCache,
+    StackTrace,
 };
 use crate::version::Version;
 
@@ -216,21 +217,33 @@ impl PythonSpy {
             None
         };
 
-        // Find PyThreadState, and loop over all the python threads
+        // Find PyThreadState head; still needed for _get_os_thread_id fallback on pre-3.11.
         let threadstate_ptr_ptr = I::threadstate_ptr_ptr(self.interpreter_address);
         let threads_head = self
             .process
             .copy_pointer(threadstate_ptr_ptr)
             .context("Failed to copy PyThreadState head pointer")?;
 
-        // get the threadid of the gil if appropriate
-        let gil_thread_id = get_gil_threadid::<I, Process>(self.threadstate_address, &self.process)
-            .context("failed to get gil_thread_id")?;
+        let gil_thread_id: u64;
+        let mut threads: *const I::ThreadState;
+
+        if self.config.gil_only {
+            let gil_addr =
+                get_gil_threadstate_addr::<I, Process>(self.threadstate_address, &self.process)
+                    .context("failed to get gil threadstate addr")?;
+            if gil_addr == 0 {
+                return Ok(Vec::new());
+            }
+            threads = gil_addr as *const I::ThreadState;
+            gil_thread_id = 0;
+        } else {
+            gil_thread_id = get_gil_threadid::<I, Process>(self.threadstate_address, &self.process)
+                .context("failed to get gil_thread_id")?;
+            threads = threads_head;
+        }
 
         let mut traces = Vec::new();
-        let mut threads = threads_head;
         while !threads.is_null() {
-            // Get the stack trace of the python thread
             let thread = self
                 .process
                 .copy_pointer(threads)
@@ -238,11 +251,7 @@ impl PythonSpy {
             threads = thread.next();
 
             let python_thread_id = thread.thread_id();
-            let owns_gil = python_thread_id == gil_thread_id;
-
-            if self.config.gil_only && !owns_gil {
-                continue;
-            }
+            let owns_gil = self.config.gil_only || python_thread_id == gil_thread_id;
 
             let mut trace = get_stack_trace(
                 &thread,

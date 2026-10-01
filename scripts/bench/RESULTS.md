@@ -29,3 +29,13 @@ per-sample cost with the new cpu-clock path. Estimated old total = after + procf
 | perf: detect on-cpu threads with per-thread cpu clocks | 1 | 3936 | 1259 | 5195 |
 | perf: detect on-cpu threads with per-thread cpu clocks | 10 | 28603 | 6287 | 34890 |
 | perf: detect on-cpu threads with per-thread cpu clocks | 50 | 161947 | 33690 | 195637 |
+
+The table below measures `bench_sample` with `gil_only=true` on Linux aarch64 (OrbStack VM)
+at varying live-thread counts. Before: list walk proportional to thread count. After: direct
+read of the GIL-owner thread state, flat in thread count.
+
+| change | threads | ns/sample (before) | reads/sample (before) | ns/sample (after) | reads/sample (after) |
+|--------|--------:|-------------------:|----------------------:|------------------:|---------------------:|
+| perf: sample the gil owner without walking the thread list | 1 | 126.0 | 8.0 | 112.6 | 7.0 |
+| perf: sample the gil owner without walking the thread list | 10 | 298.0 | 17.0 | 111.8 | 7.0 |
+| perf: sample the gil owner without walking the thread list | 50 | 1045.0 | 57.0 | 120.0 | 7.0 |
