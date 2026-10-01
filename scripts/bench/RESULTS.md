@@ -19,20 +19,28 @@ hash.
 | perf: cache resolved frames by code object | 50 | 4563.1 | 114.0 |
 | perf: cache resolved frames by code object | 200 | 16972.6 | 414.0 |
 
-All rows above use `gil_only=true`. The table below uses `gil_only=false, include_idle=true`
-on Linux aarch64 (OrbStack VM). "procfs overhead (before)" is the cost of the eliminated
-`readdir`+stat path measured in isolation. "total ns/sample (after)" is the complete
-per-sample cost with the new cpu-clock path. Estimated old total = after + procfs overhead.
+All rows above use `bench_unwind` (`gil_only=true`) at the stated stack depth on Linux
+aarch64 (OrbStack VM).
 
-| change | threads | procfs overhead ns (before) | total ns/sample (after) | est. old total ns |
-|--------|--------:|----------------------------:|------------------------:|------------------:|
-| perf: detect on-cpu threads with per-thread cpu clocks | 1 | 3936 | 1259 | 5195 |
-| perf: detect on-cpu threads with per-thread cpu clocks | 10 | 28603 | 6287 | 34890 |
-| perf: detect on-cpu threads with per-thread cpu clocks | 50 | 161947 | 33690 | 195637 |
+The table below uses `bench_sample` with `gil_only=false, include_idle=true` on Linux
+aarch64 (OrbStack VM) at stack depth 10. Worker threads spin on a tight loop so they are
+on-CPU during sampling. The timed loop runs with the GIL released so all threads are
+visible and active. "procfs overhead (before)" is the cost of the eliminated `readdir`+stat
+path measured in isolation before the cpu-clock change; those prior numbers were collected
+with the GIL held, which parked the workers and made the sampler see at most one active
+thread -- they measured a degenerate case and are superseded by the corrected rows below.
+
+| change | threads | ns/sample | reads/sample |
+|--------|--------:|----------:|-------------:|
+| fix: key the frame cache on code object identity, not just its address | 1 | 28187.6 | 22.1 |
+| fix: key the frame cache on code object identity, not just its address | 10 | 91222.9 | 133.6 |
+| fix: key the frame cache on code object identity, not just its address | 50 | 205054.9 | 785.3 |
 
 The table below measures `bench_sample` with `gil_only=true` on Linux aarch64 (OrbStack VM)
-at varying live-thread counts. Before: list walk proportional to thread count. After: direct
-read of the GIL-owner thread state, flat in thread count.
+at varying live-thread counts; stack depth during measurement was shallow (bench function
+called without deep recursion). Before: list walk proportional to thread count. After: direct
+read of the GIL-owner thread state, flat in thread count. These numbers are not affected by
+the GIL-release change: `gil_only=true` keeps the GIL held during the timed loop.
 
 | change | threads | ns/sample (before) | reads/sample (before) | ns/sample (after) | reads/sample (after) |
 |--------|--------:|-------------------:|----------------------:|------------------:|---------------------:|
