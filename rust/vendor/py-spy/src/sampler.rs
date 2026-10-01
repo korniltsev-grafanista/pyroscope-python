@@ -45,52 +45,54 @@ impl Sampler {
             Receiver<Result<Version, Error>>,
         ) = mpsc::channel();
         let config = config.clone();
-        let sampling_thread = thread::spawn(move || {
-            // We need to create this object inside the thread here since PythonSpy objects don't
-            // have the Send trait implemented on linux
-            let mut spy = match PythonSpy::retry_new(pid, &config, 20) {
-                Ok(spy) => {
-                    if initialized_tx.send(Ok(spy.version.clone())).is_err() {
-                        return;
-                    }
-                    spy
-                }
-                Err(e) => {
-                    initialized_tx.send(Err(e)).unwrap();
-                    return;
-                }
-            };
-
-            for sleep in Timer::new(spy.config.sampling_rate as f64) {
-                let mut sampling_errors = None;
-                let traces = match spy.get_stack_traces() {
-                    Ok(traces) => traces,
-                    Err(e) => {
-                        if spy.process.exe().is_err() {
-                            info!(
-                                "stopped sampling pid {} because the process exited",
-                                spy.pid
-                            );
-                            break;
+        let sampling_thread = thread::Builder::new()
+            .name("pyro-sampler".to_string())
+            .spawn(move || {
+                // We need to create this object inside the thread here since PythonSpy objects don't
+                // have the Send trait implemented on linux
+                let mut spy = match PythonSpy::retry_new(pid, &config, 20) {
+                    Ok(spy) => {
+                        if initialized_tx.send(Ok(spy.version.clone())).is_err() {
+                            return;
                         }
-                        sampling_errors = Some(vec![(spy.pid, e)]);
-                        Vec::new()
+                        spy
+                    }
+                    Err(e) => {
+                        initialized_tx.send(Err(e)).unwrap();
+                        return;
                     }
                 };
 
-                let late = sleep.err();
-                if tx
-                    .send(Sample {
-                        traces,
-                        sampling_errors,
-                        late,
-                    })
-                    .is_err()
-                {
-                    break;
+                for sleep in Timer::new(spy.config.sampling_rate as f64) {
+                    let mut sampling_errors = None;
+                    let traces = match spy.get_stack_traces() {
+                        Ok(traces) => traces,
+                        Err(e) => {
+                            if spy.process.exe().is_err() {
+                                info!(
+                                    "stopped sampling pid {} because the process exited",
+                                    spy.pid
+                                );
+                                break;
+                            }
+                            sampling_errors = Some(vec![(spy.pid, e)]);
+                            Vec::new()
+                        }
+                    };
+
+                    let late = sleep.err();
+                    if tx
+                        .send(Sample {
+                            traces,
+                            sampling_errors,
+                            late,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
-            }
-        });
+            })?;
 
         let version = initialized_rx.recv()??;
         Ok(Sampler {

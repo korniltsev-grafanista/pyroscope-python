@@ -1,5 +1,6 @@
 [features]
 default = []
+counters = ["remoteprocess/counters"]
 
 [package]
 name = "py-spy"

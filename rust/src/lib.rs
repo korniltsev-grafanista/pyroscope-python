@@ -1,3 +1,5 @@
+#[cfg(feature = "bench")]
+mod bench;
 mod memory;
 mod pyspy_backend;
 
@@ -272,6 +274,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(remove_thread_tag, m)?)?;
     register_fork_handlers(m)?;
     register_atexit_handler(m)?;
+    #[cfg(feature = "bench")]
+    bench::register(m)?;
     Ok(())
 }
 

@@ -166,7 +166,10 @@ fn childpids(pid: Pid) -> Result<Vec<Pid>, Error> {
 impl super::ProcessMemory for Process {
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Error> {
         let handle: ProcessHandle = self.task.try_into()?;
-        Ok(handle.copy_address(addr, buf)?)
+        handle.copy_address(addr, buf)?;
+        #[cfg(feature = "counters")]
+        crate::counters::add(buf.len());
+        Ok(())
     }
 }
 

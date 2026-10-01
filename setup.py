@@ -24,6 +24,9 @@ env.update({
 features = []
 if sysconfig.get_config_var("Py_GIL_DISABLED") != 1:
     features.append("memory")
+extra = os.environ.get("PYROSCOPE_BUILD_FEATURES", "")
+if extra:
+    features.extend(f for f in extra.split(",") if f)
 
 setup(
     rust_extensions=[

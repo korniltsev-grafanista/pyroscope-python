@@ -48,3 +48,6 @@ pub use python_spy::PythonSpy;
 pub use remoteprocess::Pid;
 pub use stack_trace::Frame;
 pub use stack_trace::StackTrace;
+
+#[cfg(feature = "counters")]
+pub use remoteprocess::counters;

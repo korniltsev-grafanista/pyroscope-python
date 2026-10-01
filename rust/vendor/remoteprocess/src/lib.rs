@@ -71,6 +71,24 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
+#[cfg(feature = "counters")]
+pub mod counters {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static READS: AtomicU64 = AtomicU64::new(0);
+    static BYTES: AtomicU64 = AtomicU64::new(0);
+
+    pub fn add(bytes: usize) {
+        READS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    pub fn take() -> (u64, u64) {
+        let r = READS.swap(0, Ordering::Relaxed);
+        let b = BYTES.swap(0, Ordering::Relaxed);
+        (r, b)
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     NoBinaryForAddress(u64),
