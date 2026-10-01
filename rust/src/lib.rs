@@ -163,6 +163,35 @@ fn initialize_agent(
         return false;
     }
 
+    #[cfg(all(
+        any(target_os = "linux", target_os = "macos"),
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    {
+        match kindasafe_init::init() {
+            Ok(()) => match kindasafe_init::sanity_check() {
+                Ok(()) => {
+                    remoteprocess::enable_kindasafe();
+                    log::info!(target: "pyroscope-python", "kindasafe fast path enabled");
+                }
+                Err(e) => {
+                    log::warn!(
+                        target: "pyroscope-python",
+                        "kindasafe sanity check failed ({:?}); using syscall path",
+                        e
+                    );
+                }
+            },
+            Err(e) => {
+                log::warn!(
+                    target: "pyroscope-python",
+                    "kindasafe init failed ({:?}); using syscall path",
+                    e
+                );
+            }
+        }
+    }
+
     let backend_config = BackendConfig {
         report_thread_id,
         report_thread_name,

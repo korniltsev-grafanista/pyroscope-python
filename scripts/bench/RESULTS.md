@@ -12,3 +12,6 @@ hash.
 | perf: read structs without heap allocation | 10 | 25744.6 | 118.0 |
 | perf: read structs without heap allocation | 50 | 108883.6 | 438.0 |
 | perf: read structs without heap allocation | 200 | 392267.9 | 1638.0 |
+| perf: read own memory with guarded memcpy instead of a syscall | 10 | 2375.8 | 118.0 |
+| perf: read own memory with guarded memcpy instead of a syscall | 50 | 10557.7 | 438.0 |
+| perf: read own memory with guarded memcpy instead of a syscall | 200 | 27556.3 | 1638.0 |

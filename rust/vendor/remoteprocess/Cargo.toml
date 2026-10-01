@@ -34,8 +34,14 @@ memmap2 = "0.9.10"
 [target.'cfg(windows)'.dependencies]
 winapi = {version = "0.3", features = ["winbase", "consoleapi", "wincon", "handleapi", "timeapi", "processenv", "errhandlingapi" ]}
 
+[target.'cfg(all(any(target_os = "linux", target_os = "macos"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+kindasafe = { git = "https://github.com/grafana/pyroscope-kinda-safe", rev = "a2c5388ce896940424890519f5f9faab08394c83" }
+
 [dev-dependencies]
 env_logger = "0.11"
+
+[target.'cfg(all(any(target_os = "linux", target_os = "macos"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dev-dependencies]
+kindasafe_init = { git = "https://github.com/grafana/pyroscope-kinda-safe", rev = "a2c5388ce896940424890519f5f9faab08394c83" }
 
 [target.'cfg(target_os="freebsd")'.dev-dependencies]
 mark-flaky-tests = "1"

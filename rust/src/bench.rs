@@ -6,6 +6,16 @@ use pyo3::wrap_pyfunction;
 
 #[pyfunction]
 pub fn bench_unwind(_py: Python<'_>, iterations: u64) -> PyResult<(f64, f64, f64)> {
+    #[cfg(all(
+        any(target_os = "linux", target_os = "macos"),
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    {
+        if kindasafe_init::init().is_ok() && kindasafe_init::sanity_check().is_ok() {
+            remoteprocess::enable_kindasafe();
+        }
+    }
+
     let pid: py_spy::Pid = std::process::id()
         .try_into()
         .map_err(|e: std::num::TryFromIntError| PyRuntimeError::new_err(e.to_string()))?;

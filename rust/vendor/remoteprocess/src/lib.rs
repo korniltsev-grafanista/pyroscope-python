@@ -61,6 +61,21 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::*;
 
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub(crate) static KINDASAFE_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub fn enable_kindasafe() {
+    KINDASAFE_ENABLED.store(true, std::sync::atomic::Ordering::Release);
+}
+
 #[cfg(target_os = "freebsd")]
 mod freebsd;
 #[cfg(target_os = "freebsd")]
@@ -95,6 +110,11 @@ pub enum Error {
     GoblinError(::goblin::error::Error),
     IOError(std::io::Error),
     Other(String),
+    #[cfg(all(
+        any(target_os = "linux", target_os = "macos"),
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    ReadMemFault(u64),
     #[cfg(target_os = "linux")]
     NixError(nix::Error),
 }
@@ -112,6 +132,11 @@ impl std::fmt::Display for Error {
             Error::GoblinError(ref e) => e.fmt(f),
             Error::IOError(ref e) => e.fmt(f),
             Error::Other(ref e) => write!(f, "{}", e),
+            #[cfg(all(
+                any(target_os = "linux", target_os = "macos"),
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            Error::ReadMemFault(sig) => write!(f, "read faulted with signal {}", sig),
             #[cfg(target_os = "linux")]
             Error::NixError(ref e) => e.fmt(f),
         }
@@ -302,6 +327,55 @@ fn filter_child_pids(
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[cfg(all(
+        any(target_os = "linux", target_os = "macos"),
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[test]
+    fn test_kindasafe_read_path() {
+        let page = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                4096,
+                libc::PROT_NONE,
+                libc::MAP_PRIVATE | libc::MAP_ANON,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(page, libc::MAP_FAILED, "mmap failed");
+        let addr = page as usize;
+
+        let pid = unsafe { libc::getpid() };
+        let process = Process::new(pid).expect("Process::new failed");
+        assert!(process.is_self, "process must report is_self for own pid");
+
+        // Negative control: flag off, syscall path -- must still report an error.
+        assert!(
+            !KINDASAFE_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+            "KINDASAFE_ENABLED must start false for this test"
+        );
+        let mut buf = [0u8; 8];
+        let syscall_result = process.read(addr, &mut buf);
+        assert!(
+            syscall_result.is_err(),
+            "syscall path must fail for PROT_NONE page"
+        );
+
+        // Positive: flag on, kindasafe path -- must return ReadMemFault specifically.
+        kindasafe_init::init().expect("kindasafe init failed");
+        kindasafe_init::sanity_check().expect("kindasafe sanity check failed");
+        enable_kindasafe();
+        let fast_result = process.read(addr, &mut buf);
+        assert!(
+            matches!(fast_result, Err(Error::ReadMemFault(_))),
+            "kindasafe path must return ReadMemFault, got {:?}",
+            fast_result
+        );
+
+        unsafe { libc::munmap(page, 4096) };
+    }
 
     #[derive(Copy, Clone)]
     struct Point {

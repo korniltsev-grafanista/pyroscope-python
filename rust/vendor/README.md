@@ -40,3 +40,22 @@ the edits above.
 To re-sync: check out the upstream repo at the desired SHA, copy `src/`,
 `Cargo.toml`, `build.rs`, `LICENSE`, `README.md` here, then reapply all
 the edits above.
+
+## kindasafe / kindasafe_init
+
+These crates are not vendored; they are pulled from git at build time.
+
+- Source: https://github.com/grafana/pyroscope-kinda-safe
+- Pinned rev: `a2c5388ce896940424890519f5f9faab08394c83`
+  (branch `perf/aarch64-slice-blocks`, draft PR
+  [grafana/pyroscope-kinda-safe#41](https://github.com/grafana/pyroscope-kinda-safe/pull/41))
+- Both crates **must** come from the same git source and rev. A mixed pin
+  (one from git, one from crates.io) builds two copies of `kindasafe`; the
+  signal handler matches crash-point PCs from one copy while reads execute
+  code in the other, so the first bad pointer kills the process silently.
+  There is no compile-time signal for this.
+- TODO: move pin to a released version once the PR merges.
+- Known limitation: we assume this process owns SIGSEGV and SIGBUS. Any
+  handler installed after ours (CPython `faulthandler`, a crash reporter,
+  pytest's default setup) breaks fault recovery. Detection and chaining are
+  left as a follow-up.

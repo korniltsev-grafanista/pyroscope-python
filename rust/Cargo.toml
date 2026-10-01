@@ -16,6 +16,7 @@ name = "_native"
 
 [dependencies]
 py-spy = { path = "vendor/py-spy", default-features = false }
+remoteprocess = { path = "vendor/remoteprocess" }
 pretty_env_logger = "0.5"
 log = "0.4"
 libc = "0.2"
@@ -28,6 +29,9 @@ prost = "0.14"
 hashbrown = "0.17.1"
 lazy_static = "1.5.0"
 pyo3 = { version = "0.29.0", features = ["extension-module"] }
+
+[target.'cfg(all(any(target_os = "linux", target_os = "macos"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+kindasafe_init = { git = "https://github.com/grafana/pyroscope-kinda-safe", rev = "a2c5388ce896940424890519f5f9faab08394c83" }
 
 [build-dependencies]
 cmake = "0.1"

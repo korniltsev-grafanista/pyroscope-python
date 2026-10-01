@@ -23,6 +23,7 @@ pub type Tid = pid_t;
 
 pub struct Process {
     pub pid: Pid,
+    pub is_self: bool,
 }
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone)]
@@ -32,7 +33,8 @@ pub struct Thread {
 
 impl Process {
     pub fn new(pid: Pid) -> Result<Process, Error> {
-        Ok(Process { pid })
+        let is_self = pid == unsafe { libc::getpid() };
+        Ok(Process { pid, is_self })
     }
 
     pub fn exe(&self) -> Result<String, Error> {
@@ -139,6 +141,13 @@ impl Process {
 
 impl super::ProcessMemory for Process {
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Error> {
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        if self.is_self && crate::KINDASAFE_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            kindasafe::slice(buf, addr as u64).map_err(|e| Error::ReadMemFault(e.signal))?;
+            #[cfg(feature = "counters")]
+            crate::counters::add(buf.len());
+            return Ok(());
+        }
         let handle: ProcessHandle = self.pid.try_into()?;
         handle.copy_address(addr, buf)?;
         #[cfg(feature = "counters")]

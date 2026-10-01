@@ -886,6 +886,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kindasafe"
+version = "0.1.1"
+source = "git+https://github.com/grafana/pyroscope-kinda-safe?rev=a2c5388ce896940424890519f5f9faab08394c83#a2c5388ce896940424890519f5f9faab08394c83"
+
+[[package]]
+name = "kindasafe_init"
+version = "0.1.1"
+source = "git+https://github.com/grafana/pyroscope-kinda-safe?rev=a2c5388ce896940424890519f5f9faab08394c83#a2c5388ce896940424890519f5f9faab08394c83"
+dependencies = [
+ "kindasafe",
+ "libc",
+ "spin",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -959,6 +974,15 @@ name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
+
+[[package]]
+name = "lock_api"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+dependencies = [
+ "scopeguard",
+]
 
 [[package]]
 name = "log"
@@ -1450,6 +1474,7 @@ version = "1.2.4"
 dependencies = [
  "cmake",
  "hashbrown 0.17.1",
+ "kindasafe_init",
  "lazy_static",
  "libc",
  "libflate",
@@ -1458,6 +1483,7 @@ dependencies = [
  "prost",
  "py-spy",
  "pyo3",
+ "remoteprocess",
  "reqwest",
  "thiserror",
  "url",
@@ -1573,6 +1599,8 @@ dependencies = [
  "cfg-if",
  "env_logger 0.11.11",
  "goblin",
+ "kindasafe",
+ "kindasafe_init",
  "lazy_static",
  "libc",
  "libproc",
@@ -1703,6 +1731,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "scopeguard"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
 name = "scroll"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1824,6 +1858,15 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "spin"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
