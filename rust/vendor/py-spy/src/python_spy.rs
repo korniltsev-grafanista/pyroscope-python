@@ -250,6 +250,10 @@ impl PythonSpy {
                 .context("Failed to copy PyThreadState")?;
             threads = thread.next();
 
+            if self.config.gil_only && thread.interp() as usize != self.interpreter_address {
+                return Ok(Vec::new());
+            }
+
             let python_thread_id = thread.thread_id();
             let owns_gil = self.config.gil_only || python_thread_id == gil_thread_id;
 
