@@ -173,7 +173,7 @@ fn initialize_agent(
             Ok(()) => {
                 remoteprocess::enable_kindasafe();
                 let pid: remoteprocess::Pid = std::process::id().try_into().unwrap();
-                let probe_ok = remoteprocess::Process::new(pid).ok().map_or(false, |proc| {
+                let probe_ok = remoteprocess::Process::new(pid).ok().is_some_and(|proc| {
                     let page = unsafe {
                         libc::mmap(
                             std::ptr::null_mut(),
