@@ -1,6 +1,8 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{Context, Error, Result};
+use lru::LruCache;
 
 use remoteprocess::{Pid, ProcessMemory};
 use serde_derive::Serialize;
@@ -10,6 +12,26 @@ use crate::python_data_access::{copy_bytes, copy_string};
 use crate::python_interpreters::{
     CodeObject, FrameObject, InterpreterState, ThreadState, TupleObject,
 };
+
+const FRAME_CACHE_CAPACITY: usize = 4096;
+
+/// Code-object-derived fields cached per (code_ptr, lasti, first_lineno).
+pub struct CachedFrame {
+    pub name: String,
+    pub filename: String,
+    pub module: Option<String>,
+    pub line: i32,
+}
+
+/// LRU cache keyed on (code_ptr, lasti, first_lineno).
+/// first_lineno is part of the key to guard against code-ptr reuse: when CPython
+/// frees a code object and allocates a new one at the same address, the first
+/// line number will differ, causing a miss and a fresh read.
+pub type FrameCache = LruCache<(usize, i32, i32), CachedFrame>;
+
+pub fn new_frame_cache() -> FrameCache {
+    LruCache::new(NonZeroUsize::new(FRAME_CACHE_CAPACITY).unwrap())
+}
 
 /// Call stack for a single python thread
 #[derive(Debug, Clone, Serialize)]
@@ -96,7 +118,7 @@ where
             .copy_pointer(threads)
             .context("Failed to copy PyThreadState")?;
 
-        let mut trace = get_stack_trace(&thread, process, dump_locals > 0, lineno)?;
+        let mut trace = get_stack_trace(&thread, process, dump_locals > 0, lineno, None)?;
         trace.owns_gil = trace.thread_id == gil_thread_id;
 
         ret.push(trace);
@@ -109,18 +131,20 @@ where
     Ok(ret)
 }
 
-/// Gets a stack trace for an individual thread
+/// Gets a stack trace for an individual thread.
+/// Pass `Some(cache)` from a `PythonSpy` to skip redundant string reads on repeated samples.
+/// The free-function variant `get_stack_traces` passes `None`.
 pub fn get_stack_trace<T, P>(
     thread: &T,
     process: &P,
     copy_locals: bool,
     lineno: LineNo,
+    cache: Option<&mut FrameCache>,
 ) -> Result<StackTrace, Error>
 where
     T: ThreadState,
     P: ProcessMemory,
 {
-    // TODO: just return frames here? everything else probably should be returned out of scope
     let mut frames = Vec::new();
 
     // python 3.11+ has an extra level of indirection to get the Frame from the threadstate
@@ -140,6 +164,9 @@ where
         }
     };
 
+    // Reborrow as &mut Option<&mut FrameCache> for use inside the loop.
+    let mut cache = cache;
+
     while !frame_ptr.is_null() {
         let frame = process
             .copy_pointer(frame_ptr)
@@ -151,9 +178,43 @@ where
             continue;
         }
 
+        let code_ptr = frame.code() as usize;
+        let lasti = frame.lasti();
         let code = process
             .copy_pointer(frame.code())
             .context("Failed to copy PyCodeObject")?;
+        // first_lineno is part of the cache key; it guards against code-ptr reuse
+        let first_lineno = code.first_lineno();
+        let cache_key = (code_ptr, lasti, first_lineno);
+
+        if let Some(ref mut c) = cache {
+            if let Some(cached) = c.get(&cache_key) {
+                let locals = if copy_locals {
+                    Some(
+                        get_locals(&code, frame_ptr, &frame, process)
+                            .context("Failed to get local variables")?,
+                    )
+                } else {
+                    None
+                };
+                let is_entry = frame.is_entry();
+                frames.push(Frame {
+                    name: cached.name.clone(),
+                    filename: cached.filename.clone(),
+                    line: cached.line,
+                    short_filename: None,
+                    module: cached.module.clone(),
+                    locals,
+                    is_entry,
+                    is_shim_entry: false,
+                });
+                if frames.len() > 4096 {
+                    return Err(format_err!("Max frame recursion depth reached"));
+                }
+                frame_ptr = frame.back();
+                continue;
+            }
+        }
 
         let filename = copy_string(code.filename(), process).context("Failed to copy filename");
 
@@ -210,6 +271,18 @@ where
         } else {
             None
         };
+
+        if let Some(ref mut c) = cache {
+            c.put(
+                cache_key,
+                CachedFrame {
+                    name: name.clone(),
+                    filename: filename.clone(),
+                    module: None,
+                    line,
+                },
+            );
+        }
 
         let is_entry = frame.is_entry();
 
@@ -385,5 +458,106 @@ mod tests {
         };
         let lineno = get_line_number(&code, 30, &LocalProcess).unwrap();
         assert_eq!(lineno, 7);
+    }
+
+    #[test]
+    fn test_frame_cache_key_discrimination() {
+        let mut cache = new_frame_cache();
+        let entry = CachedFrame {
+            name: "foo".to_string(),
+            filename: "a.py".to_string(),
+            module: None,
+            line: 10,
+        };
+        cache.put((1000usize, 5i32, 1i32), entry);
+
+        assert!(cache.get(&(1000, 5, 1)).is_some(), "same key should hit");
+        assert!(
+            cache.get(&(1000, 6, 1)).is_none(),
+            "different lasti should miss"
+        );
+        assert!(
+            cache.get(&(1000, 5, 2)).is_none(),
+            "different first_lineno should miss"
+        );
+        assert!(
+            cache.get(&(2000, 5, 1)).is_none(),
+            "different code_ptr should miss"
+        );
+    }
+
+    #[cfg(feature = "counters")]
+    #[test]
+    fn test_frame_cache_reduces_reads() {
+        use crate::config::LineNo;
+        use crate::python_bindings::v3_7_0::{self as py, _frame, _ts};
+        use crate::python_data_access::tests::to_asciiobject;
+
+        struct CountingProcess;
+        impl remoteprocess::ProcessMemory for CountingProcess {
+            fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), remoteprocess::Error> {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(addr as *mut u8, buf.as_mut_ptr(), buf.len());
+                }
+                remoteprocess::counters::add(buf.len());
+                Ok(())
+            }
+        }
+
+        let mut filename_obj = to_asciiobject("bench.py");
+        let mut name_obj = to_asciiobject("bench_fn");
+        let mut lnotab_obj = to_byteobject(&[]);
+
+        let mut code = PyCodeObject {
+            co_firstlineno: 1,
+            co_filename: &mut filename_obj.base.ob_base as *mut py::PyASCIIObject
+                as *mut py::PyObject,
+            co_name: &mut name_obj.base.ob_base as *mut py::PyASCIIObject as *mut py::PyObject,
+            co_lnotab: &mut lnotab_obj.base as *mut py::PyBytesObject as *mut py::PyObject,
+            ..Default::default()
+        };
+
+        let mut frame = _frame {
+            f_code: &mut code as *mut PyCodeObject,
+            f_back: std::ptr::null_mut(),
+            f_lasti: 0,
+            ..Default::default()
+        };
+
+        let thread = _ts {
+            frame: &mut frame as *mut _frame,
+            next: std::ptr::null_mut(),
+            ..Default::default()
+        };
+
+        let mut cache = new_frame_cache();
+
+        // Reset counters before measuring.
+        remoteprocess::counters::take();
+
+        get_stack_trace(
+            &thread,
+            &CountingProcess,
+            false,
+            LineNo::LastInstruction,
+            Some(&mut cache),
+        )
+        .unwrap();
+        let (cold_reads, _) = remoteprocess::counters::take();
+
+        get_stack_trace(
+            &thread,
+            &CountingProcess,
+            false,
+            LineNo::LastInstruction,
+            Some(&mut cache),
+        )
+        .unwrap();
+        let (warm_reads, _) = remoteprocess::counters::take();
+
+        assert!(
+            warm_reads * 3 < cold_reads,
+            "expected warm reads ({warm_reads}) to be < 1/3 of cold reads ({cold_reads})"
+        );
     }
 }

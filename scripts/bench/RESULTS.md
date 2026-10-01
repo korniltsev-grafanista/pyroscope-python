@@ -15,3 +15,6 @@ hash.
 | perf: read own memory with guarded memcpy instead of a syscall | 10 | 2375.8 | 118.0 |
 | perf: read own memory with guarded memcpy instead of a syscall | 50 | 10557.7 | 438.0 |
 | perf: read own memory with guarded memcpy instead of a syscall | 200 | 27556.3 | 1638.0 |
+| perf: cache resolved frames by code object | 10 | 1187.5 | 34.0 |
+| perf: cache resolved frames by code object | 50 | 4563.1 | 114.0 |
+| perf: cache resolved frames by code object | 200 | 16972.6 | 414.0 |

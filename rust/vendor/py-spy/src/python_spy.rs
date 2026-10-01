@@ -16,7 +16,9 @@ use crate::python_process_info::{
     PythonDebugOffsets, PythonProcessInfo,
 };
 use crate::python_threading::thread_name_lookup;
-use crate::stack_trace::{get_gil_threadid, get_stack_trace, StackTrace};
+use crate::stack_trace::{
+    get_gil_threadid, get_stack_trace, new_frame_cache, FrameCache, StackTrace,
+};
 use crate::version::Version;
 
 /// Lets you retrieve stack traces of a running python program
@@ -28,6 +30,7 @@ pub struct PythonSpy {
     pub threadstate_address: usize,
     pub config: Config,
     pub short_filenames: HashMap<String, Option<String>>,
+    pub frame_cache: FrameCache,
     pub python_thread_ids: HashMap<u64, Tid>,
     pub python_thread_names: HashMap<u64, String>,
     pub(crate) debug_offsets: Option<PythonDebugOffsets>,
@@ -79,6 +82,7 @@ impl PythonSpy {
             python_thread_ids: HashMap::new(),
             python_thread_names: HashMap::new(),
             debug_offsets,
+            frame_cache: new_frame_cache(),
         })
     }
 
@@ -234,6 +238,7 @@ impl PythonSpy {
                 &self.process,
                 self.config.dump_locals > 0,
                 self.config.lineno,
+                Some(&mut self.frame_cache),
             )
             .with_context(|| {
                 format!(
