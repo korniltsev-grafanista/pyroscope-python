@@ -16,7 +16,6 @@
       "description": "Always update these to latest, all update types. Overrides the wildcard enabled:false from security:only-security-updates.",
       "matchPackageNames": [
         "pyroscope",
-        "py-spy",
         "openssl/openssl"
       ],
       "enabled": true
