@@ -52,10 +52,11 @@ fn decode_ucs2(bytes: Vec<u8>) -> Result<String, Error> {
 }
 
 fn decode_ucs4(bytes: Vec<u8>) -> Result<String, Error> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(format_err!("UCS-4 byte length must be a multiple of 4"));
     }
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let chars = bytes
         .chunks_exact(4)
         .map(|chunk| u32::from_ne_bytes(chunk.try_into().unwrap()))
@@ -600,7 +601,7 @@ pub mod tests {
         };
         unsafe {
             let ptr = &mut ret as *mut AllocatedPyASCIIObject as *mut u8;
-            let dst = ptr.offset(std::mem::size_of::<PyASCIIObject>() as isize);
+            let dst = ptr.add(std::mem::size_of::<PyASCIIObject>());
             copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());
         }
         ret

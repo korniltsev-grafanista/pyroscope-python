@@ -1,8 +1,6 @@
 mod mach_thread_bindings;
 mod utils;
 
-use mach;
-use std;
 use std::convert::TryInto;
 
 use super::Error;
@@ -89,7 +87,7 @@ impl Process {
             let mut ret = Vec::new();
             for arg in args.split(|b| *b == 0) {
                 // ignore leading nulls
-                if arg.len() == 0 && ret.len() == 0 {
+                if arg.is_empty() && ret.is_empty() {
                     continue;
                 }
 
@@ -215,8 +213,8 @@ impl Thread {
             let result = thread_get_state(
                 self.tid,
                 x86_THREAD_STATE64,
-                std::mem::transmute(&thread_state),
-                std::mem::transmute(&thread_state_size),
+                &thread_state as *const mach::structs::x86_thread_state64_t as *mut u32,
+                &thread_state_size as *const u32 as *mut u32,
             );
             if result != KERN_SUCCESS {
                 return Err(std::io::Error::last_os_error());

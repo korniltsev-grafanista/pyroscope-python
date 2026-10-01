@@ -20,13 +20,6 @@ pub struct BinaryInfo {
     pub size: u64,
 }
 
-impl BinaryInfo {
-    #[cfg(feature = "unwind")]
-    pub fn contains(&self, addr: u64) -> bool {
-        addr >= self.addr && addr < (self.addr + self.size)
-    }
-}
-
 #[cfg(target_os = "macos")]
 fn get_mach_cpu_type() -> goblin::mach::cputype::CpuType {
     let mut is_arm: i32 = 0;
@@ -34,7 +27,7 @@ fn get_mach_cpu_type() -> goblin::mach::cputype::CpuType {
     unsafe {
         let name = std::ffi::CString::new("hw.optional.arm64").expect("CString::new failed");
         let ret = libc::sysctlbyname(
-            name.as_ptr() as *const i8,
+            name.as_ptr(),
             &mut is_arm as *mut _ as *mut libc::c_void,
             &mut size,
             std::ptr::null_mut(),

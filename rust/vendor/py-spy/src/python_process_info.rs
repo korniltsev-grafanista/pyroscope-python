@@ -541,9 +541,9 @@ where
             }
         }
     };
-    return Err(format_err!(
+    Err(format_err!(
         "Failed to find _PyRuntime address from symbols"
-    ));
+    ))
 }
 
 fn get_interpreter_address_from_binary<P>(

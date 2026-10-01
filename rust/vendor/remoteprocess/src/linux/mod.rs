@@ -1,8 +1,3 @@
-#[cfg(use_libunwind)]
-pub mod libunwind;
-#[cfg(use_libunwind)]
-mod symbolication;
-
 use lazy_static::lazy_static;
 use libc::pid_t;
 use log::{debug, info, warn};
@@ -20,12 +15,6 @@ use std::io::Read;
 use std::os::fd::AsFd;
 
 use super::Error;
-
-#[cfg(use_libunwind)]
-pub use self::symbolication::*;
-
-#[cfg(use_libunwind)]
-pub use self::libunwind::Unwinder;
 
 use read_process_memory::{CopyAddress, ProcessHandle};
 
@@ -145,16 +134,6 @@ impl Process {
     pub fn child_processes(&self) -> Result<Vec<(Pid, Pid)>, Error> {
         let processes = get_process_tree()?;
         Ok(crate::filter_child_pids(self.pid, &processes))
-    }
-
-    #[cfg(use_libunwind)]
-    pub fn unwinder(&self) -> Result<Unwinder, Error> {
-        Ok(Unwinder::new()?)
-    }
-
-    #[cfg(use_libunwind)]
-    pub fn symbolicator(&self) -> Result<Symbolicator, Error> {
-        Ok(Symbolicator::new(self.pid)?)
     }
 }
 

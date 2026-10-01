@@ -77,8 +77,6 @@ pub enum Error {
     GoblinError(::goblin::error::Error),
     IOError(std::io::Error),
     Other(String),
-    #[cfg(use_libunwind)]
-    LibunwindError(linux::libunwind::Error),
     #[cfg(target_os = "linux")]
     NixError(nix::Error),
 }
@@ -96,8 +94,6 @@ impl std::fmt::Display for Error {
             Error::GoblinError(ref e) => e.fmt(f),
             Error::IOError(ref e) => e.fmt(f),
             Error::Other(ref e) => write!(f, "{}", e),
-            #[cfg(use_libunwind)]
-            Error::LibunwindError(ref e) => e.fmt(f),
             #[cfg(target_os = "linux")]
             Error::NixError(ref e) => e.fmt(f),
         }
@@ -109,8 +105,6 @@ impl std::error::Error for Error {
         match *self {
             Error::GoblinError(ref e) => Some(e),
             Error::IOError(ref e) => Some(e),
-            #[cfg(use_libunwind)]
-            Error::LibunwindError(ref e) => Some(e),
             #[cfg(target_os = "linux")]
             Error::NixError(ref e) => Some(e),
             _ => None,
@@ -137,13 +131,6 @@ impl From<nix::Error> for Error {
     }
 }
 
-#[cfg(use_libunwind)]
-impl From<linux::libunwind::Error> for Error {
-    fn from(err: linux::libunwind::Error) -> Error {
-        Error::LibunwindError(err)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct StackFrame {
     pub line: Option<u64>,
@@ -155,7 +142,7 @@ pub struct StackFrame {
 
 impl std::fmt::Display for StackFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let function = self.function.as_ref().map(String::as_str).unwrap_or("?");
+        let function = self.function.as_deref().unwrap_or("?");
         if let Some(filename) = self.filename.as_ref() {
             write!(
                 f,

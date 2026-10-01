@@ -1,16 +1,10 @@
 use std::collections::HashMap;
-#[cfg(all(target_os = "linux", feature = "unwind"))]
-use std::collections::HashSet;
-#[cfg(all(target_os = "linux", feature = "unwind"))]
-use std::iter::FromIterator;
 use std::path::Path;
 
 use anyhow::{Context, Error, Result};
 use remoteprocess::{Pid, Process, ProcessMemory, Tid};
 
 use crate::config::{Config, LockingStrategy};
-#[cfg(feature = "unwind")]
-use crate::native_stack_trace::NativeStack;
 use crate::python_bindings::{
     v2_7_15, v3_10_0, v3_11_0, v3_12_0, v3_13_0, v3_14_0, v3_3_7, v3_5_5, v3_6_6, v3_7_0, v3_8_0,
     v3_9_5,
@@ -33,8 +27,6 @@ pub struct PythonSpy {
     pub interpreter_address: usize,
     pub threadstate_address: usize,
     pub config: Config,
-    #[cfg(feature = "unwind")]
-    pub native: Option<NativeStack>,
     pub short_filenames: HashMap<String, Option<String>>,
     pub python_thread_ids: HashMap<u64, Tid>,
     pub python_thread_names: HashMap<u64, String>,
@@ -74,25 +66,12 @@ impl PythonSpy {
             config,
         )?;
 
-        #[cfg(feature = "unwind")]
-        let native = if config.native {
-            Some(NativeStack::new(
-                pid,
-                python_info.python_binary,
-                python_info.libpython_binary,
-            )?)
-        } else {
-            None
-        };
-
         Ok(PythonSpy {
             pid,
             process,
             version,
             interpreter_address,
             threadstate_address,
-            #[cfg(feature = "unwind")]
-            native,
             #[cfg(target_os = "linux")]
             dockerized: python_info.dockerized,
             config: config.clone(),
@@ -307,23 +286,8 @@ impl PythonSpy {
             // processors and even then seems to be wrong occasionally in thinking 'select'
             // calls are active (which seems related to the thread locking code,
             // this problem doesn't seem to happen with the --nonblocking option)
-            // Note: this should be done before the native merging for correct results
             if trace.active {
                 trace.active = !self._heuristic_is_thread_idle(&trace);
-            }
-
-            // Merge in the native stack frames if necessary
-            #[cfg(feature = "unwind")]
-            {
-                if self.config.native {
-                    if let Some(native) = self.native.as_mut() {
-                        let thread_id = trace
-                            .os_thread_id
-                            .ok_or_else(|| format_err!("failed to get os threadid"))?;
-                        let os_thread = remoteprocess::Thread::new(thread_id as Tid)?;
-                        trace.frames = native.merge_native_thread(&trace.frames, &os_thread)?
-                    }
-                }
             }
 
             for frame in &mut trace.frames {
@@ -411,128 +375,13 @@ impl PythonSpy {
         Ok(None)
     }
 
-    #[cfg(all(target_os = "linux", not(feature = "unwind")))]
+    #[cfg(target_os = "linux")]
     fn _get_os_thread_id<I: InterpreterState>(
         &mut self,
         _python_thread_id: u64,
         _interp_head: *const I::ThreadState,
     ) -> Result<Option<Tid>, Error> {
         Ok(None)
-    }
-
-    #[cfg(all(target_os = "linux", feature = "unwind"))]
-    fn _get_os_thread_id<I: InterpreterState>(
-        &mut self,
-        python_thread_id: u64,
-        interp_head: *const I::ThreadState,
-    ) -> Result<Option<Tid>, Error> {
-        // in nonblocking mode, we can't get the threadid reliably (method here requires reading the RBX
-        // register which requires a ptrace attach). fallback to heuristic thread activity here
-        if self.config.blocking == LockingStrategy::NonBlocking {
-            return Ok(None);
-        }
-
-        // likewise this doesn't yet work for profiling processes running inside docker containers from the host os
-        if self.dockerized {
-            return Ok(None);
-        }
-
-        // If we've already know this threadid, we're good
-        if let Some(thread_id) = self.python_thread_ids.get(&python_thread_id) {
-            return Ok(Some(*thread_id));
-        }
-
-        // Get a list of all the python thread ids
-        let mut all_python_threads = HashSet::new();
-        let mut threads = interp_head;
-        while !threads.is_null() {
-            let thread = self
-                .process
-                .copy_pointer(threads)
-                .context("Failed to copy PyThreadState")?;
-            let current = thread.thread_id();
-            all_python_threads.insert(current);
-            threads = thread.next();
-        }
-
-        let processed_os_threads: HashSet<Tid> =
-            HashSet::from_iter(self.python_thread_ids.values().copied());
-
-        let unwinder = self.process.unwinder()?;
-
-        // Try getting the pthread_id from the native stack registers for threads we haven't looked up yet
-        for thread in self.process.threads()?.iter() {
-            let threadid = thread.id()?;
-            if processed_os_threads.contains(&threadid) {
-                continue;
-            }
-
-            match self._get_pthread_id(&unwinder, thread, &all_python_threads) {
-                Ok(pthread_id) => {
-                    if pthread_id != 0 {
-                        self.python_thread_ids.insert(pthread_id, threadid);
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to get get_pthread_id for {}: {}", threadid, e);
-                }
-            };
-        }
-
-        // we can't get the python threadid for the main thread from registers,
-        // so instead assign the main threadid (pid) to the missing python thread
-        if !processed_os_threads.contains(&self.pid) {
-            let mut unknown_python_threadids = HashSet::new();
-            for python_thread_id in all_python_threads.iter() {
-                if !self.python_thread_ids.contains_key(python_thread_id) {
-                    unknown_python_threadids.insert(*python_thread_id);
-                }
-            }
-
-            if unknown_python_threadids.len() == 1 {
-                let python_thread_id = *unknown_python_threadids.iter().next().unwrap();
-                self.python_thread_ids.insert(python_thread_id, self.pid);
-            } else {
-                warn!("failed to get python threadid for main thread!");
-            }
-        }
-
-        if let Some(thread_id) = self.python_thread_ids.get(&python_thread_id) {
-            return Ok(Some(*thread_id));
-        }
-        info!("failed looking up python threadid for {}. known python_thread_ids {:?}. all_python_threads {:?}",
-            python_thread_id, self.python_thread_ids, all_python_threads);
-        Ok(None)
-    }
-
-    #[cfg(all(target_os = "linux", feature = "unwind"))]
-    pub fn _get_pthread_id(
-        &self,
-        unwinder: &remoteprocess::Unwinder,
-        thread: &remoteprocess::Thread,
-        threadids: &HashSet<u64>,
-    ) -> Result<u64, Error> {
-        let mut pthread_id = 0;
-
-        let mut cursor = unwinder.cursor(thread)?;
-        while let Some(_) = cursor.next() {
-            // the pthread_id is usually a register (rbx on x86-64, r5 on ARM) in the top-level
-            // frame of the thread, but on some configs can be 2nd level. Handle this by taking the
-            // top-most value that is one of the pthread_ids we're looking for
-            #[cfg(target_arch = "x86_64")]
-            let possible_threadid = cursor.bx();
-            #[cfg(target_arch = "arm")]
-            let possible_threadid = cursor.r5();
-            #[cfg(target_arch = "aarch64")]
-            let possible_threadid = unsafe { cursor.register(19) };
-            if let Ok(reg) = possible_threadid {
-                if reg != 0 && threadids.contains(&reg) {
-                    pthread_id = reg;
-                }
-            }
-        }
-
-        Ok(pthread_id)
     }
 
     #[cfg(target_os = "freebsd")]

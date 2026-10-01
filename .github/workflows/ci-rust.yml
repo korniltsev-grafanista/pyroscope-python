@@ -46,7 +46,7 @@ jobs:
           export Python3_ROOT_DIR=$(python3 -c 'import sys, pathlib; print(pathlib.Path(sys.base_prefix).resolve())')
           export Python3_EXECUTABLE=$(python3 -c 'import sys; print(sys.executable)')
           cargo clippy -p pyroscope_python_extension --all-targets --all-features -- --deny warnings
-          cargo clippy -p py-spy -p remoteprocess --all-targets --no-default-features
+          cargo clippy -p py-spy -p remoteprocess --all-targets --no-default-features -- --deny warnings
         working-directory: rust
 
   test:
