@@ -80,6 +80,12 @@ jobs:
           cargo test -p pyroscope_python_extension --locked --all-features
         working-directory: rust
 
+      - name: Run vendored crates' tests
+        run: |
+          cargo test -p py-spy -p remoteprocess --locked --no-default-features
+          cargo test -p py-spy --locked --features counters
+        working-directory: rust
+
   miri:
     name: cargo miri
     runs-on: ${{ github.repository_owner == 'grafana' && 'ubuntu-x64-small' || 'ubuntu-latest' }}
