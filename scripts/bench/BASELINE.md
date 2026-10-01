@@ -5,7 +5,7 @@
 - Machine: OrbStack ubuntu (aarch64)
 - OS: Ubuntu 24.04
 - CPython: 3.12.3
-- Commit: afb94e6054fe8ad70ca3af797f77a46939ef30f7
+- Commit: 6d4eb34 (test: add sampler benchmark harness)
 
 The micro-benchmark samples a frozen stack from the GIL-holding thread, so it
 is an A/B instrument rather than a model of production overhead.

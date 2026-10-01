@@ -230,9 +230,12 @@ pub trait ProcessMemory {
     /// another process: this fails to compile for types that have a niche.
     fn copy_struct<T: Copy>(&self, addr: usize) -> Result<T, Error> {
         let () = AssertNoNiche::<T>::ASSERT;
-        let mut data = vec![0; std::mem::size_of::<T>()];
-        self.read(addr, &mut data)?;
-        Ok(unsafe { std::ptr::read(data.as_ptr() as *const _) })
+        let mut buf = std::mem::MaybeUninit::<T>::zeroed();
+        let slice = unsafe {
+            std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, std::mem::size_of::<T>())
+        };
+        self.read(addr, slice)?;
+        Ok(unsafe { buf.assume_init() })
     }
 
     /// Given a pointer that points to a struct in another process, returns the struct
@@ -322,5 +325,54 @@ pub mod tests {
             .unwrap();
         assert_eq!(original.x, copy.x);
         assert_eq!(original.y, copy.y);
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct Quad {
+        a: u32,
+        b: u64,
+        c: u16,
+        d: u8,
+    }
+
+    #[test]
+    fn test_copy_struct_repr_c_multi_field() {
+        let original = Quad {
+            a: 0x1234_5678,
+            b: 0xdead_beef_cafe_babe,
+            c: 0xabcd,
+            d: 0xff,
+        };
+        let copy: Quad = LocalProcess
+            .copy_struct(&original as *const Quad as usize)
+            .unwrap();
+        assert_eq!(original.a, copy.a);
+        assert_eq!(original.b, copy.b);
+        assert_eq!(original.c, copy.c);
+        assert_eq!(original.d, copy.d);
+    }
+
+    #[repr(C, packed)]
+    #[derive(Copy, Clone)]
+    struct Packed5 {
+        a: u32,
+        b: u8,
+    }
+
+    #[test]
+    fn test_copy_struct_size_not_power_of_two() {
+        assert_eq!(std::mem::size_of::<Packed5>(), 5);
+        let original = Packed5 {
+            a: 0xdeadbeef,
+            b: 0x42,
+        };
+        let copy: Packed5 = LocalProcess
+            .copy_struct(&original as *const Packed5 as usize)
+            .unwrap();
+        let (oa, ob) = ({ original.a }, original.b);
+        let (ca, cb) = ({ copy.a }, copy.b);
+        assert_eq!(oa, ca);
+        assert_eq!(ob, cb);
     }
 }
