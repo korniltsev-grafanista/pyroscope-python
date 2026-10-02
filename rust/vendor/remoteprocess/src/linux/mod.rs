@@ -53,7 +53,7 @@ impl Process {
         f.read_to_end(&mut buffer)?;
 
         let mut ret = Vec::new();
-        for arg in buffer.split(|b| *b == 0).filter(|b| b.len() > 0) {
+        for arg in buffer.split(|b| *b == 0).filter(|b| !b.is_empty()) {
             ret.push(
                 String::from_utf8(arg.to_vec())
                     .map_err(|e| Error::Other(format!("Failed to convert utf8 {}", e)))?,
@@ -106,7 +106,7 @@ impl Process {
         }
 
         if all_locks_failed {
-            return Err(Error::Other(format!("All threads failed to lock")));
+            return Err(Error::Other("All threads failed to lock".to_string()));
         }
 
         Ok(Lock { locks })
@@ -164,7 +164,7 @@ impl Thread {
     }
 
     pub fn lock(&self) -> Result<ThreadLock, Error> {
-        Ok(ThreadLock::new(self.tid)?)
+        ThreadLock::new(self.tid)
     }
 
     pub fn id(&self) -> Result<Tid, Error> {
@@ -179,8 +179,8 @@ impl Thread {
     pub fn active(&self) -> Result<bool, Error> {
         let mut file = File::open(format!("/proc/{}/stat", self.tid))?;
         let mut buf = [0u8; 512];
-        file.read(&mut buf)?;
-        match get_active_status(&buf) {
+        let n = file.read(&mut buf)?;
+        match get_active_status(&buf[..n]) {
             Some(stat) => Ok(stat == b'R'),
             None => Err(Error::Other(format!(
                 "Failed to parse /proc/{}/stat",
@@ -341,8 +341,9 @@ fn get_active_status(stat: &[u8]) -> Option<u8> {
 fn get_parent_pid(pid: Pid) -> Result<Pid, Error> {
     let mut file = File::open(format!("/proc/{}/stat", pid))?;
     let mut buf = [0u8; 512];
-    file.read(&mut buf)?;
-    get_ppid_status(&buf).ok_or_else(|| Error::Other(format!("Failed to parse /proc/{}/stat", pid)))
+    let n = file.read(&mut buf)?;
+    get_ppid_status(&buf[..n])
+        .ok_or_else(|| Error::Other(format!("Failed to parse /proc/{}/stat", pid)))
 }
 
 fn get_ppid_status(stat: &[u8]) -> Option<Pid> {
