@@ -23,8 +23,10 @@
   `#[cfg(feature = "unwind")]` blocks from surviving files
 
 To re-sync: check out the upstream repo at the desired SHA, copy `src/`,
-`Cargo.toml`, `build.rs`, `LICENSE`, `README.md` here, then reapply all
-the edits above.
+`Cargo.toml`, `LICENSE`, `README.md` here, then reapply all the edits above
+and the lint fixes listed under "Lint gate" below. `build.rs` is no longer
+copied: both vendored build scripts were deleted because the cfgs they set
+(`unwind`, `use_libunwind`) are not read by any surviving source.
 
 ## remoteprocess
 
@@ -38,8 +40,30 @@ the edits above.
   `build.rs`; `unwind` feature removed from `Cargo.toml`
 
 To re-sync: check out the upstream repo at the desired SHA, copy `src/`,
-`Cargo.toml`, `build.rs`, `LICENSE`, `README.md` here, then reapply all
-the edits above.
+`Cargo.toml`, `LICENSE`, `README.md` here, then reapply all the edits above
+and the lint fixes listed under "Lint gate" below. `build.rs` is no longer
+copied: both vendored build scripts were deleted because the cfgs they set
+(`unwind`, `use_libunwind`) are not read by any surviving source.
+
+## Lint gate
+
+`cargo fmt --all --check` and `cargo clippy -p py-spy -p remoteprocess
+--all-targets --no-default-features -- --deny warnings` both cover these
+crates in CI, so a re-sync must reapply the formatting and lint fixes or CI
+fails. Note that much of the affected code is `#[cfg(target_os = "linux")]`,
+so **linting on macOS does not see it**: verify on Linux.
+
+Fixes applied to upstream code so far:
+
+- `osx/mod.rs`: dropped redundant `use mach;` and `use std;`
+- `v3_8_0.rs`, `v3_14_0.rs`, `python_data_access.rs`: `.offset` to `.add`
+- `python_data_access.rs`: `#[allow(clippy::chunks_exact_to_as_chunks)]`
+  (the suggested `as_chunks` is nightly only)
+- assorted: `is_multiple_of`, `as_deref`, `is_empty`, dropped `return`
+- `linux/mod.rs`: `!b.is_empty()` for a length comparison, `to_string()` for a
+  `format!` with no arguments, dropped a needless `?` on a returned `Result`,
+  and handled the `read` return value for the two `/proc/<pid>/stat` reads so
+  only the bytes actually read are parsed
 
 ## kindasafe / kindasafe_init
 
@@ -58,7 +82,10 @@ These crates are not vendored; they are pulled from git at build time.
   fast path if it does not return `ReadMemFault`, catching this mismatch
   at startup.
 - TODO: move pin to a released version once the PR merges.
-- Known limitation: we assume this process owns SIGSEGV and SIGBUS. Any
-  handler installed after ours (CPython `faulthandler`, a crash reporter,
-  pytest's default setup) breaks fault recovery. Detection and chaining are
-  left as a follow-up.
+- Known limitation: we assume this process owns SIGSEGV and SIGBUS. A handler
+  installed *before* ours is chained and preserved, so the common case of
+  pytest enabling `faulthandler` during startup is fine. The hazard is a
+  handler installed *after* ours, which displaces recovery: with CPython's
+  `faulthandler` the usual symptom is a fatal-error dump per faulting read
+  rather than an immediate kill, and with a handler that does not chain the
+  process dies. Detection is left as a follow-up.
