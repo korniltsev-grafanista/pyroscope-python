@@ -201,8 +201,6 @@ impl PythonSpy {
             map
         };
         #[cfg(target_os = "linux")]
-        let thread_activity: HashMap<Tid, bool> = HashMap::new();
-        #[cfg(target_os = "linux")]
         let mut seen_tids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
         // Lock the process if appropriate. Note we have to lock AFTER getting the thread
@@ -273,17 +271,21 @@ impl PythonSpy {
             // for older versions of python, try using OS specific code to get the native
             // thread id (doesn't work on freebsd, or on arm/i686 processors on linux)
             if trace.os_thread_id.is_none() {
-                let mut os_thread_id = self._get_os_thread_id::<I>(python_thread_id)?;
+                let os_thread_id = self._get_os_thread_id::<I>(python_thread_id)?;
 
                 #[cfg(not(target_os = "linux"))]
-                if let Some(tid) = os_thread_id {
-                    if !thread_activity.is_empty() && !thread_activity.contains_key(&tid) {
-                        info!("clearing away thread id caches, thread {} has exited", tid);
-                        self.python_thread_ids.clear();
-                        self.python_thread_names.clear();
-                        os_thread_id = self._get_os_thread_id::<I>(python_thread_id)?;
+                let os_thread_id = {
+                    let mut os_thread_id = os_thread_id;
+                    if let Some(tid) = os_thread_id {
+                        if !thread_activity.is_empty() && !thread_activity.contains_key(&tid) {
+                            info!("clearing away thread id caches, thread {} has exited", tid);
+                            self.python_thread_ids.clear();
+                            self.python_thread_names.clear();
+                            os_thread_id = self._get_os_thread_id::<I>(python_thread_id)?;
+                        }
                     }
-                }
+                    os_thread_id
+                };
 
                 trace.os_thread_id = os_thread_id.map(|id| id as u64);
             }
