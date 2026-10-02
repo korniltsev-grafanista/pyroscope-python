@@ -12,7 +12,6 @@ description = "Sampling profiler for Python programs "
 readme = "README.md"
 exclude = ["images/*", "test_programs/*"]
 license = "MIT"
-build = "build.rs"
 edition = "2021"
 rust-version = "1.98"
 
