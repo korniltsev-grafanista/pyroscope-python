@@ -142,7 +142,7 @@ impl Process {
 impl super::ProcessMemory for Process {
     fn read(&self, addr: usize, buf: &mut [u8]) -> Result<(), Error> {
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        if self.is_self && crate::KINDASAFE_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.is_self && crate::KINDASAFE_ENABLED.load(std::sync::atomic::Ordering::Acquire) {
             kindasafe::slice(buf, addr as u64).map_err(|e| Error::ReadMemFault(e.signal))?;
             #[cfg(feature = "counters")]
             crate::counters::add(buf.len());
