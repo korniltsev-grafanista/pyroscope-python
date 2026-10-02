@@ -21,12 +21,18 @@ env.update({
     "Python3_EXECUTABLE": sys.executable,
 })
 
+OPTIONAL_FEATURES = {"bench"}
+
 features = []
 if sysconfig.get_config_var("Py_GIL_DISABLED") != 1:
     features.append("memory")
-extra = os.environ.get("PYROSCOPE_BUILD_FEATURES", "")
-if extra:
-    features.extend(f for f in extra.split(",") if f)
+for name in os.environ.get("PYROSCOPE_BUILD_FEATURES", "").split(","):
+    name = name.strip()
+    if not name:
+        continue
+    if name not in OPTIONAL_FEATURES:
+        raise SystemExit(f"PYROSCOPE_BUILD_FEATURES: unknown feature {name!r}")
+    features.append(name)
 
 setup(
     rust_extensions=[

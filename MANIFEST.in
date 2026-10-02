@@ -2,6 +2,7 @@ include rust/Cargo.toml
 include rust/Cargo.lock
 include rust/build.rs
 recursive-include rust/src/ *.rs
+include rust/vendor/README.md
 include rust/vendor/py-spy/Cargo.toml
 include rust/vendor/py-spy/LICENSE
 recursive-include rust/vendor/py-spy/src/ *.rs
