@@ -15,7 +15,6 @@ use crate::python_interpreters::{
 
 const FRAME_CACHE_CAPACITY: usize = 4096;
 
-/// Code-object-derived fields cached per code-object identity.
 pub struct CachedFrame {
     pub name: String,
     pub filename: String,
@@ -131,8 +130,6 @@ where
 }
 
 /// Gets a stack trace for an individual thread.
-/// Pass `Some(cache)` from a `PythonSpy` to skip redundant string reads on repeated samples.
-/// The free-function variant `get_stack_traces` passes `None`.
 pub fn get_stack_trace<T, P>(
     thread: &T,
     process: &P,
@@ -163,7 +160,6 @@ where
         }
     };
 
-    // Reborrow as &mut Option<&mut FrameCache> for use inside the loop.
     let mut cache = cache;
 
     while !frame_ptr.is_null() {
@@ -554,7 +550,6 @@ mod tests {
 
         let mut cache = new_frame_cache();
 
-        // Reset counters before measuring.
         remoteprocess::counters::take();
 
         get_stack_trace(

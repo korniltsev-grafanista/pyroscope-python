@@ -29,7 +29,7 @@ from workload import run as workload_run
 
 
 def _find_sampler_tid(name: str = "pyro-sampler") -> int | None:
-    task_dir = f"/proc/self/task"
+    task_dir = "/proc/self/task"
     try:
         for tid in os.listdir(task_dir):
             comm_path = os.path.join(task_dir, tid, "comm")

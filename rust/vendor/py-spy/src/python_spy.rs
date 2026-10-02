@@ -186,8 +186,6 @@ impl PythonSpy {
 
     // implementation of get_stack_traces, where we have a type for the InterpreterState
     fn _get_stack_traces<I: InterpreterState>(&mut self) -> Result<Vec<StackTrace>, Error> {
-        // On non-Linux platforms, query the OS for per-thread run state via procfs.
-        // On Linux, per-thread CPU clocks replace this (see _is_thread_on_cpu).
         #[cfg(not(target_os = "linux"))]
         let thread_activity: HashMap<Tid, bool> = {
             let mut map = HashMap::new();
